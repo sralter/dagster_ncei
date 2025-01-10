@@ -2,6 +2,7 @@
 ncei_token.txt
 *.sqlite
 data/
+weather_token.txt
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
