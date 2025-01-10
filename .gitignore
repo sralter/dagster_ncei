@@ -1,6 +1,7 @@
 .DS_Store
-token.txt
-
+ncei_token.txt
+*.sqlite
+data/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
