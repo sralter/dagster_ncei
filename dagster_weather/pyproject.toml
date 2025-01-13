@@ -1,0 +1,29 @@
+[project]
+name = "dagster_weather"
+version = "0.1.0"
+description = "Weather forecast pipeline"
+readme = "README.md"
+requires-python = ">=3.9,<3.13"
+dependencies = [
+    "dagster",
+    "dagster-cloud",
+]
+
+[project.optional-dependencies]
+dev = [
+    "dagster-webserver", 
+    "pytest",
+]
+
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[tool.dagster]
+module_name = "dagster_weather.definitions"  # Points to where the pipeline is defined
+project_name = "dagster_weather"
+module = "dagster_weather.weather_pipeline"  # Correct reference to the pipeline module
+code-locations = ["dagster_weather.definitions"]
+
+[tool.setuptools.packages.find]
+exclude=["dagster_weather_tests"]

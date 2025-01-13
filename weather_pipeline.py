@@ -1,8 +1,11 @@
+# dagster_weather/weather_pipeline.py
+
 import requests
 import matplotlib.pyplot as plt
 from datetime import datetime
 from pathlib import Path
-from dagster import op, job, Out
+from dagster import op, job, Out, Field, In, MetadataValue, TypeCheck
+from dagster import DagsterType, Noneable
 import logging
 from typing import Mapping, Union, Dict
 import re
@@ -23,38 +26,74 @@ def is_valid_email(email: str) -> bool:
     pattern = r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$"
     return bool(re.match(pattern, email))
 
-@op(config_schema={"latlon_file": str, "email_file": str})
-def fetch_information(context) -> Dict[str, Union[float, float, str]]:
-    """
-    latlon_file: File containing latitude and longitude in the format:
-        lat: <value>, lon: <value>
-    email_file: Plain text file containing a single email address.
-    """
-    
-    latlon_file = Path(context.op_config["latlon_file"])
-    email_file = Path(context.op_config["email_file"])
-
-    logger.info(f"Reading latitude and longitude from {latlon_file}")
-    with latlon_file.open('r') as file:
+def parse_latlon(file_path: Path) -> Dict[str, float]:
+    """Parse latitude and longitude from the file."""
+    with file_path.open('r') as file:
         latlon = file.read().strip()
-    latlon_dict = {key_value.split(': ')[0]: float(key_value.split(': ')[1])
-                   for key_value in latlon.split(', ')}
+    latlon_dict = {
+        key_value.split(': ')[0]: float(key_value.split(': ')[1])
+        for key_value in latlon.split(', ')
+    }
     latitude, longitude = latlon_dict['lat'], latlon_dict['lon']
     if not (-90 <= latitude <= 90) or not (-180 <= longitude <= 180):
         raise ValueError(f"Invalid coordinates: lat={latitude}, lon={longitude}")
-    
-    logger.info(f"Reading email address from {email_file}")
-    with email_file.open('r') as file:
-        email = file.read().strip()
+    return {"latitude": latitude, "longitude": longitude}
 
+def read_email(file_path: Path) -> str:
+    """Read and validate email from the file."""
+    with file_path.open('r') as file:
+        email = file.read().strip()
     if not is_valid_email(email):
         raise ValueError(f"Invalid email address: {email}")
+    return email
 
-    logger.info(f"Fetched information: lat={latitude}, lon={longitude}, email={email}")
-    return {"latitude": latitude, "longitude": longitude, "email": email}
+# Define a custom type for Dagster to recognize Dict[str, Union[float, str]]
+LatLonEmailType = DagsterType(
+    name="LatLonEmailType",
+    type_check_fn=lambda context, value: isinstance(value, dict) and all(
+        isinstance(k, str) and isinstance(v, (float, str)) for k, v in value.items()
+    ),
+    description="Dictionary containing latitude, longitude, and email information.",
+)
 
-@op(out={"metadata": Out(dict)})
-def fetch_metadata(info: Dict[str, Union[float, str]]) -> Dict[str, Union[float, str]]:
+@op(
+    config_schema={
+        "latlon_file": Field(str, description="Path to the latitude and longitude file."),
+        "email_file": Field(str, description="Path to the email file."),
+    },
+    out=Out(LatLonEmailType, description="Latitude, longitude, and email information."),
+)
+def fetch_information(context) -> dict:
+    """
+    Fetches latitude, longitude, and email information from specified files.
+    """
+    try:
+        latlon_file = Path(context.op_config["latlon_file"])
+        email_file = Path(context.op_config["email_file"])
+
+        if not latlon_file.exists():
+            raise FileNotFoundError(f"LatLon file not found: {latlon_file}")
+        if not email_file.exists():
+            raise FileNotFoundError(f"Email file not found: {email_file}")
+
+        logger.info(f"Reading latitude and longitude from {latlon_file}")
+        latlon = parse_latlon(latlon_file)
+
+        logger.info(f"Reading email address from {email_file}")
+        email = read_email(email_file)
+
+        logger.info(f"Fetched information: {latlon}, email={email}")
+        return {**latlon, "email": email}
+
+    except Exception as e:
+        logger.error(f"Error in fetch_information: {e}")
+        raise
+
+@op(
+    ins={"info": In(LatLonEmailType, description="Latitude, longitude, and email information.")},
+    out={"metadata": Out(dict, description="Metadata fetched from the weather API.")},
+)
+def fetch_metadata(info: dict) -> dict:
     lat = info['latitude']
     lon = info['longitude']
     email = info['email']
@@ -97,7 +136,7 @@ def parse_forecast(forecast_data: dict) -> dict:
     return {"temperatures": temperatures, "times": times}
 
 @op
-def plot_temperature(forecast: dict, latitude: float, longitude: float, save_location: str = None):
+def plot_temperature(forecast: dict, latitude: float, longitude: float, save_location: Noneable = None):
     if save_location is None:
         save_location = f"forecast_plot_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
     save_path = Path(save_location)
