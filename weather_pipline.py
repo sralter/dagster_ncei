@@ -4,10 +4,11 @@ from datetime import datetime
 from pathlib import Path
 from dagster import op, job, Output, Out
 import logging
+from typing import Mapping
 
 logger = logging.getLogger(__name__)
 
-@op(config_schema={"latlon_file": str, "email_file": str}, out={"lat": Out(float), "lon": Out(float), "email": Out(str)})
+@op(config_schema={"latlon_file": str, "email_file": str}, out=Mapping[str, Out])
 def fetch_information(context) -> dict:
     latlon_file = Path(context.op_config["latlon_file"])
     email_file = Path(context.op_config["email_file"])
@@ -24,12 +25,13 @@ def fetch_information(context) -> dict:
         email = file.read().strip()
     
     logger.info(f"Fetched information: lat={latitude}, lon={longitude}, email={email}")
-    return (
-        Output(value=latitude, output_name='lat'), Output(value=longitude, output_name='lon'), Output(value=email, output_name='email')
-    )
+    return {"latitude": Out(latitude), "longitude": Out(longitude), "email": Out(email)}
 
 @op
-def fetch_metadata(lat: float, lon: float, email: str) -> dict:
+def fetch_metadata(info: dict) -> dict:
+    lat = info['latitude']
+    lon = info['longitude']
+    email = info['email']
     logger.info(f"Fetching metadata for coordinates: ({lat}, {lon})")
     url = f'https://api.weather.gov/points/{lat},{lon}'
     headers = {"User-Agent": f"MyWeatherApp/1.0 ({email})"}
@@ -81,20 +83,8 @@ def plot_temperature(forecast: dict, save_location: str = "forecast_plot.png"):
 
 @job
 def weather_forecast_pipeline():
-    # fetch information from fetch_information
-    latlon_output = fetch_information()
-
-    # unpack the outputs as a tuple
-    lat, lon, email = latlon_output
-
-    # fetch metadata using the fetched information
-    metadata = fetch_metadata(lat=lat, lon=lon, email=email)
-    
-    # fetch forecast using the fetched metadata
-    forecast_data = fetch_forecast(metadata=metadata, email=email)
-    
-    # parse the forecast data
-    forecast = parse_forecast(forecast_data=forecast_data)
-    
-    # plot the temperature data
-    plot_temperature(forecast=forecast)
+    info = fetch_information()
+    metadata = fetch_metadata(info["latitude"], info["longitude"], info["email"])
+    forecast_data = fetch_forecast(metadata=metadata, email=info["email"])
+    forecast = parse_forecast(forecast_data)
+    plot_temperature(forecast)
