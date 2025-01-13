@@ -1,0 +1,5 @@
+ops:
+  fetch_information:
+    config:
+      latlon_file: "/Users/sra/files/projects/dagster_ncei/latlon.txt"
+      email_file: "/Users/sra/files/projects/dagster_ncei/email.txt"
